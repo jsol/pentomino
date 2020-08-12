@@ -1,0 +1,278 @@
+<head>
+
+<style>
+table {
+  border: 1px solid black;
+  border-spacing: 0px;
+}
+
+td {
+  border: 1px solid black;
+  width: 40px;
+  height: 40px;
+  text-align: center;
+  text-transform: uppercase;
+  font-family: arial;
+  font-weight: bold;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+#examples td {
+  border: 0px solid black;
+  width: 10px;
+  height: 10px;
+  text-align: center;
+  text-transform: uppercase;
+  font-family: arial;
+  font-weight: bold;
+  font-size: 10px;
+  background-color: white;
+}
+
+div {
+  margin-top: 30px;
+}
+
+.bl {
+  border-left-width: 5px; 
+}
+
+.br {
+  border-right-width: 5px; 
+}
+
+.bt {
+  border-top-width: 5px; 
+}
+
+.bb {
+  border-bottom-width: 5px; 
+}
+
+.b {
+  background-color: black;
+}
+
+.highlight {
+ background-color: yellow !important;
+}
+
+</style>
+<script>
+const puzzles = {}
+let colormap = {}
+</script>
+</head>
+
+<body>
+
+<table id = "main"></table>
+Cells selected: <span id = "selectCount">0</span>
+<div>
+Click on a cell then move the mouse in the shape you want, then click again to mark or right-click to cancel.<br>
+Ctrl + z for Undo and Ctrl + y for Redo
+</div>
+<div>
+Add blocks of five (pentominos) so that all the white cells are covered. A pentomino may not border other pentominos
+of the same shape (not even rotated or mirrored). 
+
+<p>
+A letter in a cell indicates that a pentomino of that shape must cover it - see the examples bellow.
+
+<p>
+A thicker black line between cells indicate that the two cells contain different pentominos.
+</div>
+
+<div>
+These are the 12 possible combinations and their names. They can be rotated and/or mirrored.
+</div>
+<table id = "examples"></table>
+
+</body>
+
+<script>
+let squares = false
+document.oncontextmenu = ev => {
+  squares.forEach(s => s.classList.remove('highlight'))
+  squares = false
+  return false
+}
+
+const normalize = shape => {
+  let modx = Infinity
+  let mody = Infinity
+
+  for (let s of shape) {
+    if (s.x < modx) modx = s.x
+    if (s.y < mody) mody = s.y
+  }
+
+  return shape.map(s => { return {x: s.x - modx, y: s.y - mody}})
+}
+
+const toCoords = cell =>  {
+  return {x: cell.cellIndex, y: cell.parentNode.rowIndex }
+}
+
+const toString = s => {
+  return s.map(c => '' + c.x + c.y).join('')
+}
+
+const compare = (a, b) => {
+  if (a.x != b.x) return a.x -b.x
+  return a.y - b.y
+}
+
+class ColorAction {
+  constructor(squares, previous) {
+    this.squares = [...squares]
+    this.original = this.squares.map(s => s.style.backgroundColor || 'white')
+
+    if (this.squares.length != 5) {  
+      this.newColor = 'rgb(' +
+        Math.round((Math.random() * 235) + 10) + ', ' +
+        Math.round((Math.random() * 235) + 10) + ', ' +
+        Math.round((Math.random() * 235) + 10) + ')'
+    } else {
+       const signature = toString(normalize(this.squares.map(toCoords).sort(compare)))
+       this.newColor = colormap[signature]
+    }
+
+    this.previous = previous
+    if (previous) {
+      previous.next = this
+    }
+    this.next = null
+  }
+
+  execute() {
+    this.squares.forEach(s => {
+      s.style.backgroundColor = this.newColor
+    })
+  
+  }
+
+  revert() {
+    this.squares.forEach((s, i) => {
+      s.style.backgroundColor = this.original[i]
+    })
+  }
+}
+
+let lastAction = new ColorAction([], null)
+
+document.onkeydown = ev => {
+  if (ev.key == 'z' && ev.ctrlKey && lastAction.previous !== null) {
+    lastAction.revert()
+    lastAction = lastAction.previous
+  }
+  if (ev.key == 'y' && ev.ctrlKey && lastAction !== null && lastAction.next !== null) {
+    lastAction.next.execute()
+    lastAction = lastAction.next
+  }
+}
+
+function buildTable(width, height, name = 'main') {
+  const table = document.getElementById(name)
+  table.innerHTML = '';
+  for (let i = 0; i < height; i++) {
+    const row = table.insertRow(i)
+    for (let j = 0; j < width; j++) {
+      row.insertCell(j).classList.add('b')
+    }
+  }
+}
+
+function setCellProps(cells) {
+  const table = document.getElementById('main')
+
+  cells.forEach(cell => {
+    const mod = table.rows[cell.y].cells[cell.x]
+    mod.classList.remove('b')
+    mod.classList.add(...cell.p)
+    mod.textContent = cell.l
+  })
+}
+
+function addCellOnClicks() {
+  const table = document.getElementById('main')
+  const cells = table.getElementsByTagName('td')
+  for (let i = 0, cell; cell = cells[i]; i++) {
+    if (cell.classList.contains('b')) {
+      continue
+    }
+
+    cell.onclick = ev => {
+      if (squares == false) {
+        squares = [ cell ]
+        cell.classList.add('highlight')
+        document.getElementById('selectCount').textContent = squares.length
+      } else {
+        squares.forEach(s => s.classList.remove('highlight'))
+        const a = new ColorAction(squares, lastAction)
+        a.execute()
+        lastAction = a
+        squares = false
+      }
+    }
+
+    cell.onmouseenter = ev => {
+      if (squares == false) {
+        return
+      }
+      if (squares.includes(cell)) {
+        return
+      }
+      cell.classList.add('highlight')
+      squares.push(cell)
+      document.getElementById('selectCount').textContent = squares.length
+    }
+  }
+
+}
+
+function buildExamples(examples) {
+  buildTable(60, 6, 'examples')
+  let i = 0
+  const table = document.getElementById('examples')
+
+  const setC = (x, y, c) => {
+    table.rows[y].cells[x].style.backgroundColor = c
+  }
+
+  Object.keys(examples).forEach(l => {
+    table.rows[0].cells[i* 5].textContent = l
+    const x = i * 5
+    const y = 1
+    const c = examples[l].color
+    const shape = examples[l].shape
+    shape.forEach(coord => setC(x + coord.x, y + coord.y, c))
+    i++
+  })
+}
+
+function load(name)
+{
+  name = name.toLowerCase().replace(/[^a-z]/g, '')
+  fetch(`http://www.pedell.net/pentomino/${name}.json`)
+  .then(response => response.json())
+  .then(data => {
+    buildTable(data.width, data.height)
+    setCellProps(data.cells)
+    addCellOnClicks()
+  })
+}
+
+fetch(`http://www.pedell.net/pentomino/colormap.json`)
+.then(response => response.json())
+.then(data => {
+	colormap = data
+	buildExamples(data.examples)
+	delete data.examples
+})
+
+if (window.location.hash.length > 3) {
+  load(window.location.hash.substr(1))
+}
+</script>

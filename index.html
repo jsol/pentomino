@@ -1,0 +1,903 @@
+<head>
+
+<style>
+table {
+  border: 1px solid black;
+  border-spacing: 0px;
+}
+
+td {
+  border: 1px solid black;
+  width: 30px;
+  height: 30px;
+  text-align: center;
+  text-transform: uppercase;
+  font-family: arial;
+  font-weight: bold;
+  font-size: 14px;
+}
+
+#nbrCells {
+  width: 100px;
+}
+
+#tableoptions div {
+  margin-right: 20px;
+}
+
+#tableoptions {
+  display: flex;
+  margin-bottom: 30px;
+}
+
+#log {
+  overflow-y: scroll;
+  height: 900px;
+  position: fixed;
+  right: 0;
+  width: 300px;
+  background-color: rgb(255, 255, 195);
+  font-family: arial;
+}
+
+
+#log div {
+  cursor: pointer;
+}
+
+li {
+  cursor: pointer;
+}
+
+.invisible {
+  display: none;
+}
+.borderLeft {
+  border-left-width: 5px; 
+}
+
+.borderRight {
+  border-right-width: 5px; 
+}
+
+.borderTop {
+  border-top-width: 5px; 
+}
+
+.borderBottom {
+  border-bottom-width: 5px; 
+}
+
+.highlight {
+  background-color: rgb(255, 195, 155) !important;
+}
+
+
+</style>
+<script type='text/javascript' src='./pentomino.js'></script>
+</head>
+
+<body>
+<div id = "log"></div>
+<table id = "main"></table>
+<div>
+  <span id = "nbrCells">0</span>
+  <span id = "selectCount">0</span>
+  <span id = "position">(0, 0)</span>
+</div>
+<div id = "tableoptions">
+  <div>
+    width: <input type="text" id="width"><br>
+    height: <input type="text" id="height"><br>
+    <button id = "create">Create table</button>
+  </div>
+  <div>
+    Import from img: 
+    <input type="file" id="import" >
+  </div>
+  <div>
+    <select id="action"><option>Add<option>Remove</select>
+    <input id = "rowCount">
+    <select id = "type"><option>rows<option>cols</select>
+    to / from <select id = "direction"><option>top<option>bottom</select>
+    <button id = "modifyTable">Modify</button>
+  </div>
+  <div>
+    Name: <input type="text" id = "saveName"><br>
+    <button id = "save">Save table</button><br>
+    <button id = "saveExternal">Save external</button>
+  </div>
+
+  <div>
+    <select id="restoreList"></select> <button id = "restore">Restore</button>
+  </div>
+</div>
+
+<div>
+<button id = "transfer">Transfer table</button><br>
+<button id = "advance">Advance Position</button>
+<button id = "run">Run</button>
+<button id = "hideLogs">Hide / Show logs</button>
+<button id = "setBoardState">Reset</button>
+</div>
+<div>Load boards from files: 
+<input type="file" id="file-selector" multiple>
+</div>
+<table id = "display"></table>
+<ul id = "finalBoards">
+</ul>
+
+<textarea id = "copy" class = "invisible"></textarea>
+
+<img src = "import.png"  id = "importFromImg"/>
+</body>
+
+<script>
+const pentos = [ 'f', 'i', 'l', 'n', 'p', 't', 'u', 'v', 'w', 'x', 'y', 'z' , 'Delete']
+const colormap = exportColormap()
+let lastAction = null
+let continueRun = false
+
+class Action {
+  constructor() {
+    this.previous = lastAction
+    if (this.previous) {
+      this.previous.next = this
+    }
+    this.next = null
+    lastAction = this
+  }
+}
+
+lastAction = new Action()
+
+class InsertRowsAction extends Action {
+  constructor(index, nbr, table) {
+    super()
+    this.nbr = nbr
+    this.table = table
+    this.index = index
+  }
+
+  execute() {
+    this.added = []
+    const cols = this.table.rows[0].cells.length
+    for (let i = 0; i < this.nbr; i++) {
+      const row = this.table.insertRow(this.index)
+      for (let i = 0; i < cols; i++) {
+        row.insertCell(-1)
+      }
+      this.added.push(row)
+    }
+    nbrCells()
+    addCellOnClicks()
+  }
+  revert() {
+    for (let row of this.added) {
+      this.table.deleteRow(row.rowIndex)
+    }
+    nbrCells()
+    addCellOnClicks()
+  }
+}
+
+class RemoveRowsAction extends Action {
+  constructor(index, nbr, table) {
+    super()
+    this.nbr = nbr
+    this.table = table
+    this.index = index
+  }
+
+  execute() {
+    this.removed = []
+    for (let i = 0; i < this.nbr; i++) {
+      if (this.index < 0) {
+        this.removed.push(this.table.rows[this.table.rows.length - 1])
+      } else {
+        this.removed.push(this.table.rows[0])
+      }
+      this.table.deleteRow(this.index)
+    }
+    nbrCells()
+    addCellOnClicks()
+  }
+  revert() {
+    for (let row of this.removed.reverse()) {
+      const r = this.table.insertRow(this.index)
+      r.innerHTML = row.innerHTML
+    }
+    nbrCells()
+    addCellOnClicks()
+  }
+}
+
+class InsertColsAction extends Action {
+  constructor(index, nbr, table) {
+    super()
+    this.nbr = nbr
+    this.table = table
+    this.index = index
+  }
+
+  execute() {
+    this.oldHtml = this.table.innerHTML
+    for (let row of this.table.rows) {
+      for (let i = 0; i < this.nbr; i++) {
+          row.insertCell(this.index)
+      }
+    }
+    nbrCells()
+    addCellOnClicks()
+  }
+  revert() {
+    this.table.innerHTML = this.oldHtml
+    nbrCells()
+    addCellOnClicks()
+  }
+}
+
+class RemoveColsAction extends Action {
+  constructor(index, nbr, table) {
+    super()
+    this.nbr = nbr
+    this.table = table
+    this.index = index
+  }
+
+  execute() {
+    this.oldHtml = this.table.innerHTML
+    for (let row of this.table.rows) {
+      for (let i = 0; i < this.nbr; i++) {
+          row.deleteCell(this.index)
+      }
+    }
+    nbrCells()
+    addCellOnClicks()
+  }
+
+  revert() {
+    this.table.innerHTML = this.oldHtml
+    nbrCells()
+    addCellOnClicks()
+  }
+}
+
+class LetterAction extends Action {
+  constructor(cell, key) {
+    super()
+    this.cell = cell
+    this.key = key
+    this.oldKey = this.cell.textContext
+  }
+
+  execute() {
+    if (this.key == 'Delete') {
+      this.cell.textContent = ''
+    } else {
+      this.cell.textContent = this.key
+    }
+  }
+  revert() {
+    if (this.oldKey == 'Delete') {
+      this.cell.textContent = ''
+    } else {
+      this.cell.textContent = this.oldKey
+    }
+  }
+}
+
+class BorderAction extends Action {
+  constructor(cell, border) {
+    super()
+    this.cell = cell
+    this.border = border
+  }
+  execute() {
+    this.cell.classList.toggle(this.border)
+  }
+  revert() {
+    this.cell.classList.toggle(this.border)
+  }
+}
+
+class ExcludeAction extends Action {
+  constructor(cell) {
+    super()
+    this.cell = cell
+  }
+  execute() {
+    if (this.cell.style.backgroundColor != 'black') {
+      this.cell.style.backgroundColor = 'black'
+    } else {
+      this.cell.style.backgroundColor = 'white'
+    }
+    nbrCells()
+  }
+  revert() {
+    if (this.cell.style.backgroundColor != 'black') {
+      this.cell.style.backgroundColor = 'black'
+    } else {
+      this.cell.style.backgroundColor = 'white'
+    }
+    nbrCells()
+  }
+}
+
+const normalize = shape => {
+  let modx = Infinity
+  let mody = Infinity
+
+  for (let s of shape) {
+    if (s.x < modx) modx = s.x
+    if (s.y < mody) mody = s.y
+  }
+
+  return shape.map(s => { return {x: s.x - modx, y: s.y - mody}})
+}
+
+const toCoords = cell =>  {
+  return {x: cell.cellIndex, y: cell.parentNode.rowIndex }
+}
+
+const toString = s => {
+  return s.map(c => '' + c.x + c.y).join('')
+}
+
+const compare = (a, b) => {
+  if (a.x != b.x) return a.x -b.x
+  return a.y - b.y
+}
+
+class ColorAction extends Action {
+  constructor(cells, clear) {
+    super()
+    this.cells = [...cells]
+    this.original = this.cells.map(s => s.style.backgroundColor || 'white')
+
+    if (clear) {
+      this.newColor = 'white'
+      return
+    }
+
+    if (this.cells.length != 5) {  
+      this.newColor = 'rgb(' +
+        Math.round((Math.random() * 235) + 10) + ', ' +
+        Math.round((Math.random() * 235) + 10) + ', ' +
+        Math.round((Math.random() * 235) + 10) + ')'
+    } else {
+       const signature = toString(normalize(this.cells.map(toCoords).sort(compare)))
+       this.newColor = colormap[signature]
+    }
+  }
+  execute() {
+    this.cells.forEach(s => {
+      s.style.backgroundColor = this.newColor
+    })
+  
+  }
+
+  revert() {
+    this.cells.forEach((s, i) => {
+      s.style.backgroundColor = this.original[i]
+    })
+  }
+
+}
+
+let key = ''
+let currentFinalBoard = -1
+document.onkeydown = ev => {
+  if (ev.key == ' ') {
+    document.getElementById('advance').click()
+    ev.preventDefault()
+    return
+  }
+
+  if (ev.key == 'ArrowRight') {
+    const ul = document.getElementById('finalBoards')
+    currentFinalBoard = (currentFinalBoard + 1) % ul.children.length
+    ul.children[currentFinalBoard].click()
+    return
+  }
+  if (ev.key == 'ArrowLeft') {
+    const ul = document.getElementById('finalBoards')
+    currentFinalBoard = (currentFinalBoard - 1)
+
+    if (currentFinalBoard < 0) {
+      currentFinalBoard = ul.children.length - 1
+    }
+    ul.children[currentFinalBoard].click()
+    return
+  }
+
+  if (ev.key == 'z' && ev.ctrlKey && lastAction.previous !== null) {
+    lastAction.revert()
+    lastAction = lastAction.previous
+    ev.preventDefault()
+    return
+  }
+  if (ev.key == 'y' && ev.ctrlKey && lastAction !== null && lastAction.next !== null) {
+    lastAction.next.execute()
+    lastAction = lastAction.next
+    ev.preventDefault()
+    return
+  }
+
+  if (pentos.includes(ev.key)) {
+    key = ev.key
+  }
+
+}
+
+function save() {
+  const name = document.getElementById('saveName').value
+  if (!name) {
+    alert('No name given, not saved')
+    return
+  }
+  const data = btoa(document.getElementById('main').innerHTML)
+  window.localStorage.setItem(name, data)
+  createRestoreList()
+}
+
+function createRestoreList() {
+  const list = document.getElementById('restoreList')
+  list.innerHTML = ''
+
+  const names = []
+
+  for(let i = 0; i < window.localStorage.length; i++) {
+    names.push(window.localStorage.key(i))
+  }
+
+  names.sort().forEach(name => {
+    const opt = document.createElement('option')
+    opt.innerHTML = name
+    opt.value = name
+    list.appendChild(opt)
+  })
+}
+
+function restore() {
+  const list = document.getElementById('restoreList')
+  const name = list.options[list.selectedIndex].value
+
+  const table = document.getElementById('main')
+  const data = atob(window.localStorage.getItem(name))
+  table.innerHTML = data
+  addCellOnClicks()
+  nbrCells()
+  document.getElementById('saveName').value = name
+}
+
+function nbrCells() {
+  const table = document.getElementById('main')
+  const cells = table.getElementsByTagName('td')
+  let nbr = 0
+  for (let i = 0, cell; cell = cells[i]; i++) {
+    if (cell.style.backgroundColor != 'black') {
+      nbr++
+    }
+  } 
+  const w = table.rows[0].cells.length
+  const h = table.rows.length
+  const div = document.getElementById('nbrCells')
+  div.textContent = `${nbr} (${w} x ${h})`
+
+  if (nbr % 5 == 0) {
+    div.style.backgroundColor = 'lightgreen'
+  } else {
+    div.style.backgroundColor = 'tomato'
+  }
+}
+
+function buildTable(width, height) {
+  key = ''
+  const table = document.getElementById('main')
+  table.innerHTML = '';
+  for (let i = 0; i < height; i++) {
+    const row = table.insertRow(i)
+    for (let j = 0; j < width; j++) {
+      row.insertCell(j)
+    }
+  }
+  addCellOnClicks()
+  nbrCells()
+}
+
+function getBorderClassFromClick(ev) {
+  const w = ev.srcElement.clientWidth
+  const h = ev.srcElement.clientHeight
+  const margin = w / 3
+  if (ev.offsetX < margin) {
+    return 'borderLeft'
+  }
+  if (ev.offsetX > w - margin) {
+    return 'borderRight'
+  }
+
+  if (ev.offsetY < margin) {
+    return 'borderTop'
+  }
+  if (ev.offsetY > h - margin) {
+    return 'borderBottom'
+  }
+
+  return false
+}
+
+
+function addCellOnClicks(name = 'main') {
+  const table = document.getElementById(name)
+  const cells = table.getElementsByTagName('td')
+  const squares = {
+    display: false,
+    main: false
+  }
+
+  document.oncontextmenu = ev => {
+    if (squares.display) {
+      squares.display.forEach(s => s.classList.remove('highlight'))
+    }
+    squares.display = false
+    
+    if (squares.main) {
+      squares.main.forEach(s => s.classList.remove('highlight'))
+    }
+    squares.main = false
+    return false
+  }
+
+
+  for (let i = 0, cell; cell = cells[i]; i++) {
+    cell.onclick = ev => {
+      if (name == 'main') {
+        if (ev.ctrlKey) {
+          const b = getBorderClassFromClick(ev)
+          if (b) {
+            new BorderAction(cell, b).execute()
+          }
+          return
+        }
+
+        if (ev.shiftKey) {
+          new ExcludeAction(cell).execute()
+          return
+        }
+
+        if (key) {
+          new LetterAction(cell, key).execute()
+          key = false
+          return
+        }
+      }
+
+      if (cell.style.backgroundColor == 'black') {
+        return
+      }
+      if (squares[name] == false) {
+        squares[name] = [ cell ]
+        cell.classList.add('highlight')
+        document.getElementById('selectCount').textContent = squares[name].length
+      } else {
+        squares[name].forEach(s => s.classList.remove('highlight'))
+        new ColorAction(squares[name], ev.altKey).execute()
+        squares[name] = false
+      }
+    }
+
+    cell.onmouseenter = ev => {
+      const pos = '(' + (1 + cell.cellIndex) + ', ' + (1 + cell.parentNode.rowIndex) + ')'
+      document.getElementById('position').textContent = pos
+      if (cell.style.backgroundColor == 'black') {
+        return
+      }
+
+      if (squares[name] == false) {
+        return
+      }
+      if (squares[name].includes(cell)) {
+        return
+      }
+
+      cell.classList.add('highlight')
+      squares[name].push(cell)
+      document.getElementById('selectCount').textContent = squares[name].length
+    }
+  }
+}
+
+const button = document.getElementById('create')
+button.onclick = () => {
+  buildTable(document.getElementById('width').value, document.getElementById('height').value)
+}
+
+function logSquare(msg, square = null) {
+  const line = document.createElement('div')
+  line.textContent = msg
+  if (square) {
+    line.textContent += ' at ' + square.id
+    line.onclick = () => {
+      document.getElementById('display').rows[square.y].cells[square.x].classList.add('highlight')
+      document.getElementById('display').rows[square.y].cells[square.x]
+    }
+  }
+
+  const divLog = document.getElementById('log')
+  const scroll =  divLog.scrollTop > (divLog.scrollHeight - divLog.offsetHeight - 50)
+  divLog.appendChild(line)
+  if (scroll) {
+    divLog.scrollTop = divLog.scrollHeight - divLog.clientHeight
+  }
+}
+
+let board
+let state
+const bTransfer = document.getElementById('transfer')
+bTransfer.onclick = () => {
+  const main = document.getElementById('main')
+  const display = document.getElementById('display')
+  display.innerHTML = ''
+  board = new Board()
+  for (let y = 0, row; row = main.rows[y]; y++) {
+    const dRow = display.insertRow(y)
+    for (let x = 0, cell; cell = main.rows[y].cells[x]; x++) {
+      const dCell = dRow.insertCell(x)
+      const props = []
+      for (let i = 0; i < cell.classList.length; i++) {
+        dCell.classList.add(cell.classList.item(i))
+        props.push(cell.classList.item(i))
+      }
+
+      if (cell.style.backgroundColor == 'black') {
+        dCell.style.backgroundColor = 'black'
+      } else {
+        const s = new Square(x, y, ' ', props)
+        if (pentos.includes(cell.textContent)) {
+          s.letter = cell.textContent
+          dCell.textContent = s.letter
+        }
+        board.addSquare(s)
+      }
+    }
+  }
+  
+  document.getElementById('log').innerHTML = ''
+  state = new State(board, logSquare)
+  addCellOnClicks('display')
+}
+
+const bReset = document.getElementById('setBoardState')
+bReset.onclick = () => {
+  if (state) {
+    state.board.toHtml()
+  }
+}
+
+const bLogs = document.getElementById('hideLogs')
+bLogs.onclick = () => {
+  document.getElementById('log').classList.toggle('invisible')
+}
+
+const bAdvance = document.getElementById('advance')
+bAdvance.onclick = () => {
+  if (state) {
+    try {
+      state.advanceBoard()
+    }catch (err) {
+      console.log(err.message)
+    }
+    state.board.toHtml()
+  }
+}
+
+function addToDoneList(ulBoards, fb) {
+  const liBoard = document.createElement('li')
+  liBoard.textContent = 'Board - ' + fb.getStats()
+  liBoard.onclick = () => {
+    fb.toHtml()
+    for (const li of ulBoards.children) {
+      li.classList.remove('highlight')
+    }
+    liBoard.classList.add('highlight')
+  }
+  ulBoards.appendChild(liBoard)
+}
+
+const bRun = document.getElementById('run')
+let bltot = 0
+bRun.onclick = () => {
+  if (continueRun) {
+    continueRun = false
+    return
+  }
+
+  const conf = confirm("Are you sure?")
+  if (!conf) {
+    return
+  }
+
+  continueRun = true
+  bRun.textContent = 'Stop'
+  const start = performance.now()
+  const run = () => {
+    state.advanceBoard()
+    state.board.toHtml()
+    if (state.moreMoves && continueRun) {
+      setTimeout(run, 150)
+      return    
+    } else {
+      const stop = performance.now()
+      logSquare('Run done! It took ' + Math.round((stop - start) / 1000 / 60) + ' minutes.')
+      if (state.moreMoves) {
+        logSquare('There are more possible moves!')
+      }
+      bRun.textContent = 'Run'
+      continueRun = false
+
+      const ulBoards = document.getElementById('finalBoards')
+      ulBoards.innerHTML = ''
+      currentFinalBoard = -1
+      for (let i = 0; i < state.doneBoards.length; i++) {
+        const fb = state.doneBoards[i]
+        addToDoneList(ulBoards, fb)
+      }
+    }
+  }
+  run()
+}
+const fileSelector = document.getElementById('file-selector');
+fileSelector.addEventListener('change', event => {
+  const ulBoards = document.getElementById('finalBoards')
+  ulBoards.innerHTML = ''
+  currentFinalBoard = -1
+
+  const fileList = event.target.files;
+    
+  for (const file of fileList) {
+    if (file.type != 'application/json') {
+      continue
+    }
+    const reader = new FileReader();
+    reader.addEventListener('load', ev => {
+        const fb = Board.fromJson(JSON.parse(ev.target.result))
+        addToDoneList(ulBoards, fb)
+    })
+    reader.readAsText(file)
+  }
+});
+
+function modifyTable() {
+
+  const getListVal = id => {
+    const list = document.getElementById(id)
+    return list.options[list.selectedIndex].value
+  }
+
+  const action = getListVal('action')
+  const nbr = document.getElementById('rowCount').value
+  const type = getListVal('type')
+  const direction = getListVal('direction')
+
+  console.log(action, nbr, type, direction)
+
+  const main = document.getElementById('main')
+
+  if (direction == 'bottom') {
+    index = -1
+  } else {
+    index = 0
+  }
+
+
+  if (type == 'rows' && action == 'Add') {
+    new InsertRowsAction(index, nbr, main).execute()
+  }
+
+  if (type == 'rows' && action == 'Remove') {
+    new RemoveRowsAction(index, nbr, main).execute()
+  }
+
+  if (type == 'cols' && action == 'Add') {
+    new InsertColsAction(index, nbr, main).execute()
+  }
+
+  if (type == 'cols' && action == 'Remove') {
+    new RemoveColsAction(index, nbr, main).execute()
+  }
+
+}
+
+
+function saveExternal()
+{
+  const main = document.getElementById('main')
+  const res = {
+    width: main.rows[0].cells.length,
+    height: main.rows.length,
+    cells: []
+  }
+
+  const m = {
+    borderLeft: 'bl',
+    borderRight: 'br',
+    borderTop: 'bt',
+    borderBottom: 'bb'
+  }
+  for (let y = 0, row; row = main.rows[y]; y++) {
+    for (let x = 0, cell; cell = main.rows[y].cells[x]; x++) {
+      if (cell.style.backgroundColor == 'black') {
+        continue
+      }
+      const props = []
+      for (let i = 0; i < cell.classList.length; i++) {
+        props.push(m[cell.classList.item(i)])
+      }
+
+      const letter = cell.textContent
+
+        res.cells.push({
+          x, y , p: props, l: letter
+        })
+    }
+  }
+
+  console.log(JSON.stringify(res))
+  const copy = document.getElementById('copy')
+  copy.style.display = 'block'
+  copy.value = JSON.stringify(res)
+  copy.select()
+  document.execCommand('copy')
+  copy.style.display = 'none'
+  copy.value = ''
+}
+
+const importSelector = document.getElementById('import');
+importSelector.addEventListener('change', event => {
+  const fileList = event.target.files;
+    
+  for (const file of fileList) {
+    if (!file.type.startsWith('image/')){
+      continue
+    }
+    const img = document.createElement('img')
+    const reader = new FileReader();
+    reader.addEventListener('load', ev => {
+      img.src = ev.target.result
+      setTimeout(() => {
+        var canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        canvas.getContext('2d').drawImage(img, 0, 0, img.width, img.height);
+        buildTable(img.width, img.height)
+        const table = document.getElementById('main')
+        for (let x = 0; x < img.width; x++) {
+          for (let y = 0; y < img.height; y++) {
+            const data = canvas.getContext('2d').getImageData(x, y, 1, 1).data
+            if (data[0] < 10 && data[1] < 10 && data[2] < 10) {
+              table.rows[y].cells[x].style.backgroundColor = 'black'
+            }
+          }
+        }
+      nbrCells()
+      }, 100)
+    })
+    reader.readAsDataURL(file)
+  }
+});
+
+const bModify = document.getElementById('modifyTable')
+bModify.onclick = modifyTable
+
+const bSave = document.getElementById('save')
+bSave.onclick = save
+
+const bRestore = document.getElementById('restore')
+bRestore.onclick = restore
+
+createRestoreList()
+
+const bSaveExt = document.getElementById('saveExternal')
+bSaveExt.onclick = saveExternal
+</script>
